@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terminal de Ponto - SuperPonto ANA</title>
+
+  <!-- CSS Customizado -->
+  <link rel="stylesheet" href="assets/css/style.css">
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+
+  <!-- Supabase JS CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- CryptoJS CDN (Geração SHA-256) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+
+  <!-- Alpine.js CDN -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <!-- JS do Aplicativo -->
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/app.js"></script>
+</head>
+<body>
+
+  <main class="terminal-container" x-data="timeClock">
+
+    <!-- Cabeçalho com Relógio Principal -->
+    <header class="terminal-header">
+      <h1>
+        <i data-lucide="clock" class="icon"></i>
+        <span>Terminal de Ponto</span>
+      </h1>
+      <p x-text="currentDateStr"></p>
+      <div class="live-clock" x-text="currentTimeStr">00:00:00</div>
+    </header>
+
+    <!-- Corpo do Terminal -->
+    <section class="terminal-body">
+
+      <!-- Alertas e Mensagens de Erro -->
+      <template x-if="errorMessage">
+        <div class="alert alert-danger" role="alert">
+          <i data-lucide="alert-circle"></i>
+          <span x-text="errorMessage"></span>
+        </div>
+      </template>
+
+      <!-- Formulário de Identificação de Ponto (Exibido quando não há comprovante ativo) -->
+      <template x-if="!timeLogResult">
+        <form @submit.prevent="handleSubmit">
+          <div class="input-group">
+            <label for="employeeCodeInput">ID do Funcionário</label>
+            <div class="input-wrapper">
+              <i data-lucide="user-check" class="input-icon"></i>
+              <input
+                type="text"
+                id="employeeCodeInput"
+                x-model="employeeCode"
+                placeholder="Ex: EMP-001"
+                autocomplete="off"
+                autofocus
+                required
+              >
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary" :disabled="loading">
+            <template x-if="!loading">
+              <span style="display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="arrow-right-circle"></i>
+                <span>Registrar Ponto (Entrada / Saída)</span>
+              </span>
+            </template>
+            <template x-if="loading">
+              <span style="display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="loader" class="animate-spin"></i>
+                <span>Validando e Registrando...</span>
+              </span>
+            </template>
+          </button>
+        </form>
+      </template>
+
+      <!-- Comprovante Digital de Registro de Ponto -->
+      <template x-if="timeLogResult">
+        <div>
+          <div class="receipt-card">
+            <div class="receipt-header">
+              <i data-lucide="check-circle-2" style="color: var(--success); width: 28px; height: 28px;"></i>
+              <div>
+                <div class="receipt-title" x-text="receiptType === 'ENTRY' ? 'Ponto de ENTRADA Confirmado!' : 'Ponto de SAÍDA Confirmado!'"></div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);" x-text="'ID: ' + employee.employee_code"></div>
+              </div>
+            </div>
+
+            <div class="receipt-row">
+              <span class="receipt-label">Colaborador:</span>
+              <span class="receipt-value" x-text="employee.full_name"></span>
+            </div>
+
+            <div class="receipt-row">
+              <span class="receipt-label">Data:</span>
+              <span class="receipt-value" x-text="formatDate(timeLogResult.entry_time)"></span>
+            </div>
+
+            <template x-if="receiptType === 'ENTRY'">
+              <div class="receipt-row">
+                <span class="receipt-label">Horário Entrada:</span>
+                <span class="receipt-value" x-text="formatTime(timeLogResult.entry_time)"></span>
+              </div>
+            </template>
+
+            <template x-if="receiptType === 'EXIT'">
+              <div>
+                <div class="receipt-row">
+                  <span class="receipt-label">Horário Entrada:</span>
+                  <span class="receipt-value" x-text="formatTime(timeLogResult.entry_time)"></span>
+                </div>
+                <div class="receipt-row">
+                  <span class="receipt-label">Horário Saída:</span>
+                  <span class="receipt-value" x-text="formatTime(timeLogResult.exit_time)"></span>
+                </div>
+                <div class="receipt-row" style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--border-color);">
+                  <span class="receipt-label" style="font-weight: 700; color: var(--text-main);">Horas Trabalhadas:</span>
+                  <span class="receipt-value" style="font-weight: 800; color: var(--primary);" x-text="workedDuration"></span>
+                </div>
+              </div>
+            </template>
+
+            <!-- Hash Antifraude para Validação -->
+            <template x-if="timeLogResult.verification_code">
+              <div class="receipt-hash">
+                <div style="font-size: 0.7rem; font-weight: bold; margin-bottom: 0.25rem;">CÓDIGO SHA-256 DE AUTENTICIDADE:</div>
+                <div x-text="timeLogResult.verification_code"></div>
+              </div>
+            </template>
+
+            <!-- Barra de Progresso / Contagem de Reset -->
+            <div style="margin-top: 1rem; text-align: center; font-size: 0.8rem; color: var(--text-muted);">
+              Reiniciando terminal em <strong x-text="resetCountdown"></strong>s...
+            </div>
+            <div class="reset-timer-bar" :style="'width: ' + (resetCountdown / 8 * 100) + '%'"></div>
+          </div>
+
+          <button type="button" @click="resetTerminal" class="btn btn-secondary">
+            <i data-lucide="rotate-ccw"></i>
+            <span>Concluir e Voltar ao Início</span>
+          </button>
+        </div>
+      </template>
+
+    </section>
+
+    <!-- Rodapé de Auditoria e Segurança -->
+    <footer class="terminal-footer">
+      <div>
+        <span>IP Auditado: </span>
+        <strong x-text="clientIp"></strong>
+      </div>
+      <div class="status-badge">
+        <i data-lucide="shield-check" style="width: 14px; height: 14px;"></i>
+        <span>Sistema Ativo & Seguro</span>
+      </div>
+    </footer>
+
+  </main>
+
+</body>
+</html>
